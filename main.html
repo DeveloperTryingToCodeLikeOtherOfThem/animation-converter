@@ -1,0 +1,83 @@
+<script src="https://unpkg.com/gifuct-js/dist/gifuct.min.js"></script>
+<canvas style="display:none"></canvas>
+<textarea id="output" style="width:100%;height:200px"></textarea>
+<button id="convert">Convert GIF</button>
+
+<script>
+const canvas = document.querySelector("canvas");
+const textarea = document.getElementById("output");
+const arcadeColors = [
+    "#00000000","#ffffff","#ff2121","#ff93c4","#ff8135","#fff609",
+    "#249ca3","#78dc52","#003fad","#87f2ff","#8e2ec4","#a4839f",
+    "#5c406c","#e5cdc4","#91463d","#000000"
+].map((color, i) => {
+    return {
+        color:{
+            r: parseInt(color[1]+color[2],16),
+            g: parseInt(color[3]+color[4],16),
+            b: parseInt(color[5]+color[6],16)
+        },
+        index: i.toString(16)
+    }
+});
+
+document.getElementById("convert").addEventListener("click", function(){
+    const url = prompt("Enter GIF URL:");
+    if(!url) return;
+
+    const xhr = new XMLHttpRequest();
+    xhr.open("GET", url, false); // synchronous
+    xhr.responseType = "arraybuffer";
+    xhr.send();
+    const gif = new window.gifuct.parseGIF(xhr.response);
+    const frames = window.gifuct.decompressFrames(gif, true);
+
+    const frameStrings = [];
+
+    for(let f=0; f<frames.length; f++){
+        const frame = frames[f];
+        canvas.width = frame.dims.width;
+        canvas.height = frame.dims.height;
+        const ctx = canvas.getContext("2d");
+        const imgData = ctx.createImageData(frame.dims.width, frame.dims.height);
+        imgData.data.set(frame.patch);
+        ctx.putImageData(imgData,0,0);
+
+        const data = ctx.getImageData(0,0,canvas.width,canvas.height).data;
+        let makeCodeString = {};
+        let pixelIndex = 0;
+
+        for(let i=0;i<data.length;i+=4){
+            const x = pixelIndex % canvas.width;
+            const y = Math.floor(pixelIndex / canvas.width);
+            const r=data[i], g=data[i+1], b=data[i+2];
+
+            const nearest = arcadeColors.sort((p,c)=>{
+                return Math.abs(p.color.r-r)-Math.abs(c.color.r-r)+
+                       Math.abs(p.color.g-g)-Math.abs(c.color.g-g)+
+                       Math.abs(p.color.b-b)-Math.abs(c.color.b-b);
+            })[0];
+
+            if(!makeCodeString[`row-${y}`]) makeCodeString[`row-${y}`]="";
+            makeCodeString[`row-${y}`]+= nearest.index==="0"?"f":nearest.index;
+
+            pixelIndex++;
+        }
+        frameStrings.push(makeCodeString);
+    }
+
+    // Build MakeCode animation
+    let dateString = new Date().toISOString().replaceAll(/[-:.]/g,"");
+    let code = `let mySprite${dateString} = sprites.create(img\`${Object.values(frameStrings[0]).join("\n")}\`, SpriteKind.Player)\n`;
+    code += "let frames: Image[] = [\n";
+    for(let f=0; f<frameStrings.length; f++){
+        code+="img`\n";
+        for(const row in frameStrings[f]) code+=frameStrings[f][row]+"\n";
+        code+="`,\n";
+    }
+    code+="];\n";
+    code+=`animation.runImageAnimation(mySprite${dateString}, frames, 200, true)\n`;
+
+    textarea.value = code;
+});
+</script>
